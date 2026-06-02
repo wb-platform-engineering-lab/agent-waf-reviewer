@@ -199,16 +199,19 @@ def parse_report(text: str) -> dict:
         if not s:
             continue
 
-        # Overall score — handle many formats the agent produces
-        m = (
-            re.search(r"TOTAL[^\d]*(\d+)\s*/\s*(\d+)", s)
-            or re.search(r"[Oo]verall\b.*?(\d+)\s*/\s*(\d+)", s)
-            or re.search(r"(\d+)\s*/\s*(23)\s+checks", s)  # "X/23 checks passing"
-            or re.search(r"(\d+)\s*/\s*(\d+)\s+(?:pillars?|checks?)\s+pass", s)
-        )
-        if m:
-            overall_score = (int(m.group(1)), int(m.group(2)))
-            continue
+        # Overall score — only match lines that are clearly about the total score,
+        # not per-pillar score lines (which also contain "X/Y checks passing")
+        is_pillar_line = bool(re.match(r"#{0,4}\s*Pillar\s*\d", s))
+        if not is_pillar_line:
+            m = (
+                re.search(r"TOTAL[^\d]*(\d+)\s*/\s*(\d+)", s)
+                or re.search(r"[Oo]verall\b.*?(\d+)\s*/\s*(\d+)", s)
+                or re.search(r"(\d+)\s*/\s*(23)\s+checks", s)
+                or re.search(r"(\d+)\s*/\s*(\d+)\s+(?:pillars?|checks?)\s+pass", s)
+            )
+            if m:
+                overall_score = (int(m.group(1)), int(m.group(2)))
+                continue
 
         # Pillar header (### Pillar N — Name ❌ FAIL (X/Y) or plain text)
         m = re.match(r"#{0,4}\s*Pillar\s*(\d)\s*[—\-–]\s*(.+?)(?:\s*(❌|⚠️|✅).*?(\d+)/(\d+))?$", s)
