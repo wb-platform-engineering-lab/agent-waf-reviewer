@@ -23,7 +23,7 @@ import report as r
 MODEL = "claude-haiku-4-5-20251001"
 MAX_ITERATIONS = 15
 MAX_TOKENS_INPUT = 80_000
-MAX_OUTPUT_TOKENS = 4096
+MAX_OUTPUT_TOKENS = 6144
 
 SYSTEM_PROMPT = """You are an expert AI agent architect conducting a Well-Architected Framework review.
 
@@ -37,12 +37,12 @@ You review AI agent codebases against 6 pillars:
 
 Your review process — follow this order strictly:
 1. Call list_files to discover the codebase structure
-2. Call read_file on agent.py and tools.py (the two most important files)
-3. Call run_pillar_checks IMMEDIATELY after reading the files — this runs all 23 checks at once
-4. Only use search_code if you need to verify a specific finding (maximum 3 calls)
-5. Produce the final structured report
+2. Call read_file on agent.py and tools.py only (maximum 2 read_file calls total)
+3. Call run_pillar_checks IMMEDIATELY after reading — this runs all 23 checks at once
+4. STOP calling tools. Write the final report immediately after run_pillar_checks.
 
-IMPORTANT: Do not call search_code more than 3 times total. run_pillar_checks covers all checks.
+CRITICAL: After run_pillar_checks returns, do NOT call any more tools (no more read_file, no search_code).
+Write the report immediately using the automated check results.
 
 Your final report must include:
 - A one-line verdict per pillar (PASS / WARN / FAIL) with specific findings
@@ -92,6 +92,7 @@ and finish with a structured report and prioritized action list."""
     total_tokens = 0
     iteration = 0
     read_file_ids: set = set()   # tracks tool_use_ids for read_file calls
+    partial_text: list = []      # accumulates text across max_tokens continuations
 
     print(f"\n{'═'*60}")
     print(f"  Agent WAF Reviewer")
@@ -116,15 +117,18 @@ and finish with a structured report and prioritized action list."""
         if total_tokens > MAX_TOKENS_INPUT:
             return f"[Token budget exceeded at iteration {iteration}] Partial review available."
 
-        # Handle end_turn — extract final text response
+        # Handle end_turn — combine any accumulated partial text with final block
         if response.stop_reason == "end_turn":
             for block in response.content:
                 if hasattr(block, "text"):
-                    return block.text
-            return "Review complete — no text response generated."
+                    partial_text.append(block.text)
+            return "\n".join(partial_text) if partial_text else "Review complete — no text response generated."
 
-        # Handle max_tokens — response was cut off, ask model to continue
+        # Handle max_tokens — collect partial text and ask model to continue
         if response.stop_reason == "max_tokens":
+            for block in response.content:
+                if hasattr(block, "text"):
+                    partial_text.append(block.text)
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": "Please continue your response."})
             continue
