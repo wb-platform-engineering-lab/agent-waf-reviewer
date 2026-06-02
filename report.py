@@ -336,17 +336,17 @@ PILLAR_ICONS = {
     "4": "fa-coins",         "5": "fa-eye",   "6": "fa-bolt",
 }
 PILLAR_COLORS = {
-    "1": "#2563eb", "2": "#dc2626", "3": "#16a34a",
-    "4": "#d97706", "5": "#9333ea", "6": "#0891b2",
+    "1": "#3b82f6", "2": "#ef4444", "3": "#22c55e",
+    "4": "#f59e0b", "5": "#a855f7", "6": "#06b6d4",
 }
 
 def _status_classes(status: str):
     return {
-        "pass": ("bg-emerald-100 text-emerald-800", "text-emerald-600", "bg-emerald-500"),
-        "fail": ("bg-red-100 text-red-800",         "text-red-600",     "bg-red-500"),
-        "warn": ("bg-yellow-100 text-yellow-800",   "text-yellow-600",  "bg-yellow-400"),
-        "info": ("bg-blue-100 text-blue-800",        "text-blue-600",    "bg-blue-400"),
-    }.get(status, ("bg-gray-100 text-gray-800", "text-gray-600", "bg-gray-400"))
+        "pass": ("bg-emerald-500 text-white",  "text-emerald-500", "bg-emerald-500"),
+        "fail": ("bg-red-500 text-white",      "text-red-500",     "bg-red-500"),
+        "warn": ("bg-amber-400 text-white",    "text-amber-500",   "bg-amber-400"),
+        "info": ("bg-blue-500 text-white",     "text-blue-500",    "bg-blue-500"),
+    }.get(status, ("bg-gray-400 text-white", "text-gray-500", "bg-gray-400"))
 
 
 # ─────────────────────────────────────────────
@@ -389,11 +389,11 @@ def _pillar_summary_cards(pillars):
         icon = PILLAR_ICONS.get(p["num"], "fa-circle")
         color = PILLAR_COLORS.get(p["num"], "#2563eb")
         cards += f"""
-        <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border-t-4" style="border-top-color:{color}">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm">
           <div class="flex items-center justify-between mb-3">
             <div class="flex items-center gap-2">
-              <div class="w-8 h-8 rounded-xl flex items-center justify-center" style="background:{color}20">
-                <i class="fas {icon} text-xs" style="color:{color}"></i>
+              <div class="w-8 h-8 rounded-xl flex items-center justify-center" style="background:{color}">
+                <i class="fas {icon} text-xs text-white"></i>
               </div>
               <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Pillar {p["num"]}</span>
             </div>
@@ -404,8 +404,8 @@ def _pillar_summary_cards(pillars):
             <span class="text-gray-400">{p["pass"]}/{p["total"]} passing</span>
             <span class="font-bold {text_cls}">{pct}%</span>
           </div>
-          <div class="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5">
-            <div class="{bar_color} h-1.5 rounded-full" style="width:{pct}%"></div>
+          <div class="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+            <div class="h-2 rounded-full" style="width:{pct}%;background:{color}"></div>
           </div>
         </div>"""
     return cards
@@ -482,8 +482,8 @@ def _pillar_detail_sections(pillars):
         <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden" id="pillar-{p["num"]}">
           <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700" style="border-left:4px solid {color}">
             <div class="flex items-center gap-3">
-              <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:{color}20">
-                <i class="fas {icon} text-sm" style="color:{color}"></i>
+              <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:{color}">
+                <i class="fas {icon} text-sm text-white"></i>
               </div>
               <div>
                 <div class="font-bold text-gray-900 dark:text-white">Pillar {p["num"]} — {p["name"]}</div>
