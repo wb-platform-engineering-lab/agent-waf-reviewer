@@ -22,6 +22,7 @@ import tools as t
 MODEL = "claude-sonnet-4-6"
 MAX_ITERATIONS = 20
 MAX_TOKENS_INPUT = 150_000
+MAX_OUTPUT_TOKENS = 8192
 
 SYSTEM_PROMPT = """You are an expert AI agent architect conducting a Well-Architected Framework review.
 
@@ -33,21 +34,22 @@ You review AI agent codebases against 6 pillars:
 5. Observability — Audit logging, run IDs, token tracking
 6. Performance & Context — RAG, episodic memory, context management
 
-Your review process:
+Your review process — follow this order strictly:
 1. Call list_files to discover the codebase structure
-2. Call read_file on agent.py, tools.py, and any other key files
-3. Call run_pillar_checks to get the automated baseline
-4. Search for specific patterns with search_code as needed
-5. Produce a final structured report
+2. Call read_file on agent.py and tools.py (the two most important files)
+3. Call run_pillar_checks IMMEDIATELY after reading the files — this runs all 23 checks at once
+4. Only use search_code if you need to verify a specific finding (maximum 3 calls)
+5. Produce the final structured report
+
+IMPORTANT: Do not call search_code more than 3 times total. run_pillar_checks covers all checks.
 
 Your final report must include:
 - A one-line verdict per pillar (PASS / WARN / FAIL) with specific findings
-- Concrete line-level recommendations for each failing check
+- Concrete recommendations for each failing check referencing actual file/function names
 - An overall score (X/6 pillars passing)
 - A prioritized action list (top 3 things to fix first)
 
-Be specific. Reference actual file names, function names, and line patterns you found.
-Do not hallucinate findings — only report what you observed in the code.
+Only report what you observed. Do not hallucinate findings.
 """
 
 
@@ -78,7 +80,7 @@ and finish with a structured report and prioritized action list."""
 
         response = client.messages.create(
             model=MODEL,
-            max_tokens=4096,
+            max_tokens=MAX_OUTPUT_TOKENS,
             system=SYSTEM_PROMPT,
             tools=t.DEFINITIONS,
             messages=messages,
@@ -97,6 +99,12 @@ and finish with a structured report and prioritized action list."""
                     return block.text
             return "Review complete — no text response generated."
 
+        # Handle max_tokens — response was cut off, ask model to continue
+        if response.stop_reason == "max_tokens":
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": "Please continue your response."})
+            continue
+
         # Handle tool use
         tool_results = []
         for block in response.content:
@@ -109,7 +117,10 @@ and finish with a structured report and prioritized action list."""
                     "content": result,
                 })
 
-        # Append assistant response and tool results
+        # Only append if there are actual tool results — empty content causes API error
+        if not tool_results:
+            continue
+
         messages.append({"role": "assistant", "content": response.content})
         messages.append({"role": "user", "content": tool_results})
 
