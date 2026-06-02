@@ -14,6 +14,7 @@ import os
 import sys
 import anthropic
 import tools as t
+import report as r
 
 # ─────────────────────────────────────────────
 # Config
@@ -143,9 +144,15 @@ if __name__ == "__main__":
         print(f"Error: '{target}' is not a directory")
         sys.exit(1)
 
-    report = run_review(target)
+    review = run_review(target)
 
     print(f"\n{'═'*60}")
     print("  REVIEW REPORT")
     print(f"{'═'*60}\n")
-    print(report)
+    print(review)
+
+    # Save HTML report
+    output_path = r.save_report(review, target, output_dir=".")
+    print(f"\n{'═'*60}")
+    print(f"  HTML report saved: {output_path}")
+    print(f"{'═'*60}")
