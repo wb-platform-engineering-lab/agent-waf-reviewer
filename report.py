@@ -179,13 +179,17 @@ def _inline(text: str) -> str:
 # ─────────────────────────────────────────────
 
 def _pillar_num_from_line(s: str):
-    """Extract pillar number from a header line — handles both 'Pillar N' and 'PN:' formats."""
+    """Extract pillar number (1-6) from a heading line — handles all known formats."""
     # "### Pillar 1 —" or "## Pillar 1:"
-    m = re.match(r"#{0,4}\s*\**\s*Pillar\s*(\d)\b", s)
+    m = re.match(r"#{0,4}\s*\**\s*Pillar\s*([1-6])\b", s)
     if m:
         return m.group(1)
     # "#### **P1: Name" or "#### P1 — Name"
-    m = re.match(r"#{1,4}\s*\**\s*P(\d)\s*[:\-—–]", s)
+    m = re.match(r"#{1,4}\s*\**\s*P([1-6])\s*[:\-—–]", s)
+    if m:
+        return m.group(1)
+    # "### 1. **Governance & Control**" or "### 1. Security — FAIL"
+    m = re.match(r"#{1,4}\s*\**([1-6])[.)]\s", s)
     if m:
         return m.group(1)
     return None
@@ -330,6 +334,16 @@ def parse_report(text: str) -> dict:
                     "status": cstatus, "id": check_id,
                     "name": name, "recommendation": None,
                 })
+            continue
+
+        # Numbered check in pillar: "1. **[P2-004] FAIL — description**"
+        m = re.match(r"\d+[.)]\s+\**\s*\[([A-Z0-9\-]+)\]\s*(FAIL|WARN|PASS|INFO)\s*[—\-–]\s*\**(.+)", s)
+        if m and current_pillar is not None:
+            name = re.sub(r"\*+$", "", m.group(3)).strip()
+            current_pillar["checks"].append({
+                "status": m.group(2).lower(), "id": m.group(1),
+                "name": name, "recommendation": None,
+            })
             continue
 
         # Recommendation arrow
