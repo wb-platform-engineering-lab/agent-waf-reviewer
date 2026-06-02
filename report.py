@@ -199,10 +199,13 @@ def parse_report(text: str) -> dict:
         if not s:
             continue
 
-        # Overall score
-        m = re.search(r"TOTAL[^\d]*(\d+)\s*/\s*(\d+)", s)
-        if not m:
-            m = re.search(r"Overall[:\s]+(\d+)/(\d+)", s)
+        # Overall score — handle many formats the agent produces
+        m = (
+            re.search(r"TOTAL[^\d]*(\d+)\s*/\s*(\d+)", s)
+            or re.search(r"[Oo]verall\b.*?(\d+)\s*/\s*(\d+)", s)
+            or re.search(r"(\d+)\s*/\s*(23)\s+checks", s)  # "X/23 checks passing"
+            or re.search(r"(\d+)\s*/\s*(\d+)\s+(?:pillars?|checks?)\s+pass", s)
+        )
         if m:
             overall_score = (int(m.group(1)), int(m.group(2)))
             continue
@@ -296,6 +299,19 @@ def parse_report(text: str) -> dict:
                 action_items.append(re.sub(r"^[🔴🟠🟡#\s]*", "", m.group(2)).strip())
             elif re.match(r"^\d+[.)]\s+", s):
                 action_items.append(re.sub(r"^\d+[.)]\s+", "", s))
+
+    # Derive pass/total and status from checks when not captured from the header
+    for p in pillars:
+        if p["total"] == 0 and p["checks"]:
+            p["total"] = len(p["checks"])
+            p["pass"] = sum(1 for c in p["checks"] if c["status"] == "pass")
+        # Re-derive status if it defaulted to "pass" but checks say otherwise
+        if p["checks"] and p["status"] == "pass":
+            statuses = {c["status"] for c in p["checks"]}
+            if "fail" in statuses:
+                p["status"] = "fail"
+            elif "warn" in statuses:
+                p["status"] = "warn"
 
     # Fallback overall score
     if not overall_score and pillars:
