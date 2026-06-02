@@ -178,6 +178,19 @@ def _inline(text: str) -> str:
 # Parser — extracts structured data from text
 # ─────────────────────────────────────────────
 
+def _pillar_num_from_line(s: str):
+    """Extract pillar number from a header line — handles both 'Pillar N' and 'PN:' formats."""
+    # "### Pillar 1 —" or "## Pillar 1:"
+    m = re.match(r"#{0,4}\s*\**\s*Pillar\s*(\d)\b", s)
+    if m:
+        return m.group(1)
+    # "#### **P1: Name" or "#### P1 — Name"
+    m = re.match(r"#{1,4}\s*\**\s*P(\d)\s*[:\-—–]", s)
+    if m:
+        return m.group(1)
+    return None
+
+
 def parse_report(text: str) -> dict:
     pillar_names = {
         "1": "Governance & Control",
@@ -199,10 +212,9 @@ def parse_report(text: str) -> dict:
         if not s:
             continue
 
-        # Overall score — only match lines that are clearly about the total score,
-        # not per-pillar score lines (which also contain "X/Y checks passing")
-        is_pillar_line = bool(re.match(r"#{0,4}\s*Pillar\s*\d", s))
-        if not is_pillar_line:
+        # Overall score — guard against matching per-pillar score lines
+        num = _pillar_num_from_line(s)
+        if not num:
             m = (
                 re.search(r"TOTAL[^\d]*(\d+)\s*/\s*(\d+)", s)
                 or re.search(r"[Oo]verall\b.*?(\d+)\s*/\s*(\d+)", s)
@@ -213,10 +225,8 @@ def parse_report(text: str) -> dict:
                 overall_score = (int(m.group(1)), int(m.group(2)))
                 continue
 
-        # Pillar header (### Pillar N — Name ❌ FAIL (X/Y) or plain text)
-        m = re.match(r"#{0,4}\s*Pillar\s*(\d)\s*[—\-–]\s*(.+?)(?:\s*(❌|⚠️|✅).*?(\d+)/(\d+))?$", s)
-        if m:
-            num = m.group(1)
+        # Pillar header — "### Pillar 1 — Name" OR "#### **P1: Name — STATUS**"
+        if num:
             status_str = s.upper()
             if "FAIL" in status_str or "❌" in status_str:
                 status = "fail"
@@ -238,51 +248,88 @@ def parse_report(text: str) -> dict:
             in_actions = False
             continue
 
-        # Table check row: | P1-001 Name | ✅ PASS | — |
-        if s.startswith("|") and current_pillar is not None:
+        # Status line after pillar header: "**Status:** 4/5 checks passing"
+        if current_pillar and re.search(r"status", s, re.IGNORECASE) and current_pillar["total"] == 0:
+            sm = re.search(r"(\d+)/(\d+)", s)
+            if sm:
+                current_pillar["pass"] = int(sm.group(1))
+                current_pillar["total"] = int(sm.group(2))
+            continue
+
+        # Table check row: | P1-001 Name | ✅ PASS | — |  OR  | P1 | Name | ✅ PASS |
+        if s.startswith("|"):
             if re.match(r"^\|[\s\-:|]+\|$", s):
                 continue
             cells = [c.strip() for c in s.strip("|").split("|")]
             if len(cells) >= 2:
-                cell0 = cells[0]
-                cell1 = cells[1] if len(cells) > 1 else ""
-                cell2 = cells[2] if len(cells) > 2 else ""
-                # Extract check id and name from first cell
-                id_m = re.search(r"P\d-\d+", cell0)
-                check_id = id_m.group(0) if id_m else ""
-                name = re.sub(r"P\d-\d+\s*", "", cell0).strip() if check_id else cell0
+                # Detect status cell (could be cell[1] or cell[2])
+                status_cell, name_cell, id_cell = "", "", ""
+                for i, c in enumerate(cells):
+                    if any(x in c for x in ("✅", "❌", "⚠️", "ℹ️", "PASS", "FAIL", "WARN", "INFO")):
+                        status_cell = c
+                        name_cell = cells[i - 1] if i > 0 else ""
+                        break
 
-                if "FAIL" in cell1 or "❌" in cell1:
-                    status = "fail"
-                elif "WARN" in cell1 or "⚠" in cell1:
-                    status = "warn"
-                elif "PASS" in cell1 or "✅" in cell1:
-                    status = "pass"
-                elif "INFO" in cell1 or "ℹ" in cell1:
-                    status = "info"
+                if not status_cell:
+                    continue  # header row
+
+                id_m = re.search(r"P\d-\d+", name_cell + " ".join(cells))
+                check_id = id_m.group(0) if id_m else "—"
+                name = re.sub(r"P\d[-\s]\d+\s*", "", name_cell).strip() or name_cell
+
+                if "FAIL" in status_cell or "❌" in status_cell:
+                    cstatus = "fail"
+                elif "WARN" in status_cell or "⚠" in status_cell:
+                    cstatus = "warn"
+                elif "PASS" in status_cell or "✅" in status_cell:
+                    cstatus = "pass"
                 else:
-                    continue  # skip header row
+                    cstatus = "info"
 
-                finding = cell2 if cell2 and cell2 != "—" else None
+                # Find recommendation — look in cells after status
+                si = cells.index(status_cell) if status_cell in cells else -1
+                rec_cells = [c for c in cells[si+1:] if c and c != "—"] if si >= 0 else []
+                finding = rec_cells[0] if rec_cells else None
 
-                if check_id or name:
+                if current_pillar and name:
                     current_pillar["checks"].append({
-                        "status": status,
-                        "id": check_id or "—",
-                        "name": name,
-                        "recommendation": finding,
+                        "status": cstatus, "id": check_id,
+                        "name": name, "recommendation": finding,
                     })
             continue
 
-        # Inline check row: ❌ FAIL [P2-001] Name
-        m = re.match(r"(❌|⚠️|✅|ℹ️)\s*(FAIL|WARN|PASS|INFO)\s+\[([A-Z0-9\-]+)\]\s+(.+)", s)
+        # Inline check row: "❌ FAIL [P2-001] Name" or "❌ **FAIL [P2-001]:** Name"
+        m = re.match(r"(❌|⚠️|✅|ℹ️)\s*\**\s*(FAIL|WARN|PASS|INFO)\s+\[([A-Z0-9\-]+)\][:\*]*\s*\**\s*(.*)", s)
         if m and current_pillar is not None:
             current_pillar["checks"].append({
                 "status": m.group(2).lower(),
                 "id": m.group(3),
-                "name": m.group(4),
+                "name": re.sub(r"\*+", "", m.group(4)).strip(),
                 "recommendation": None,
             })
+            continue
+
+        # Bullet check: "- ✅ text" or "- ❌ **FAIL [P2-001]:** text"
+        m = re.match(r"[-*]\s+(✅|❌|⚠️|ℹ️)\s+(.*)", s)
+        if m and current_pillar is not None:
+            emoji, rest = m.group(1), m.group(2)
+            id_m = re.search(r"[\[(](P\d-\d+)[\])]", rest)
+            check_id = id_m.group(1) if id_m else "—"
+            if "❌" in emoji or re.search(r"\bFAIL\b", rest, re.IGNORECASE):
+                cstatus = "fail"
+            elif "⚠️" in emoji or re.search(r"\bWARN\b", rest, re.IGNORECASE):
+                cstatus = "warn"
+            elif "ℹ️" in emoji or re.search(r"\bINFO\b", rest, re.IGNORECASE):
+                cstatus = "info"
+            else:
+                cstatus = "pass"
+            name = re.sub(r"\*\*.*?\*\*\s*", "", rest)
+            name = re.sub(r"[\[(]P\d-\d+[\])].*", "", name).strip(" :")
+            if name:
+                current_pillar["checks"].append({
+                    "status": cstatus, "id": check_id,
+                    "name": name, "recommendation": None,
+                })
             continue
 
         # Recommendation arrow
@@ -293,13 +340,13 @@ def parse_report(text: str) -> dict:
             continue
 
         # Action items
-        if re.search(r"(prioriti[sz]ed action|top \d|fix these first)", s.lower()):
+        if re.search(r"(prioriti[sz]ed action|top \d|fix these first|priority \d)", s.lower()):
             in_actions = True
             continue
         if in_actions:
-            m = re.match(r"#{0,4}\s*[🔴🟠🟡#]*\s*#?(\d+)[.)—\s]+(.+)", s)
+            m = re.match(r"#{0,4}\s*[🔴🟠🟡#]*\s*#?\*?\*?(?:Priority\s*)?(\d+)[.):\-—\s]+\*?\*?(.+)", s)
             if m:
-                action_items.append(re.sub(r"^[🔴🟠🟡#\s]*", "", m.group(2)).strip())
+                action_items.append(re.sub(r"^\*+|\*+$", "", m.group(2)).strip())
             elif re.match(r"^\d+[.)]\s+", s):
                 action_items.append(re.sub(r"^\d+[.)]\s+", "", s))
 
