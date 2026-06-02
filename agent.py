@@ -58,13 +58,11 @@ Only report what you observed. Do not hallucinate findings.
 # Agent loop
 # ─────────────────────────────────────────────
 
-_TRIM_THRESHOLD = 1500   # chars — tool results larger than this get trimmed in old turns
-_TRIM_KEEP      = 300    # chars to keep from the start of a trimmed result
+_TRIM_KEEP = 300   # chars to keep when trimming a read_file result
 
 
-def _prune_context(messages: list) -> None:
-    """Trim large tool results in all but the most recent user turn to save input tokens."""
-    # Find the index of the last user message (the one we just appended)
+def _prune_context(messages: list, read_file_ids: set) -> None:
+    """Trim read_file tool results in old turns — only read_file, never run_pillar_checks."""
     last_user = max(i for i, m in enumerate(messages) if m["role"] == "user")
     for i, msg in enumerate(messages):
         if i == last_user or msg["role"] != "user":
@@ -73,9 +71,11 @@ def _prune_context(messages: list) -> None:
         if not isinstance(content, list):
             continue
         for item in content:
-            if isinstance(item, dict) and item.get("type") == "tool_result":
+            if (isinstance(item, dict)
+                    and item.get("type") == "tool_result"
+                    and item.get("tool_use_id") in read_file_ids):
                 text = item.get("content", "")
-                if isinstance(text, str) and len(text) > _TRIM_THRESHOLD:
+                if isinstance(text, str) and len(text) > _TRIM_KEEP:
                     item["content"] = text[:_TRIM_KEEP] + f"\n... [trimmed — {len(text)} chars total]"
 
 
@@ -91,6 +91,7 @@ and finish with a structured report and prioritized action list."""
     messages = [{"role": "user", "content": goal}]
     total_tokens = 0
     iteration = 0
+    read_file_ids: set = set()   # tracks tool_use_ids for read_file calls
 
     print(f"\n{'═'*60}")
     print(f"  Agent WAF Reviewer")
@@ -99,7 +100,7 @@ and finish with a structured report and prioritized action list."""
 
     while iteration < MAX_ITERATIONS:
         iteration += 1
-        _prune_context(messages)
+        _prune_context(messages, read_file_ids)
 
         response = client.messages.create(
             model=MODEL,
@@ -134,6 +135,8 @@ and finish with a structured report and prioritized action list."""
             if block.type == "tool_use":
                 print(f"         tool: {block.name}({list(block.input.keys())})")
                 result = t.dispatch(block.name, block.input)
+                if block.name == "read_file":
+                    read_file_ids.add(block.id)   # mark for future pruning
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
