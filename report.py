@@ -1,5 +1,6 @@
 """
 Converts the agent's text review into a professional HTML report.
+Uses Tailwind CSS + Font Awesome to match a clean dashboard design.
 """
 
 import os
@@ -8,12 +9,10 @@ from datetime import datetime
 
 
 # ─────────────────────────────────────────────
-# Parser — extracts structured data from text
+# Parser
 # ─────────────────────────────────────────────
 
 def parse_report(text: str) -> dict:
-    """Parse the agent's free-form text report into structured data."""
-
     pillar_names = {
         "1": "Governance & Control",
         "2": "Security",
@@ -24,227 +23,281 @@ def parse_report(text: str) -> dict:
     }
 
     pillars = []
-    checks_by_pillar = {}
     overall_score = None
     action_items = []
-    summary_lines = []
-
     current_pillar = None
     in_actions = False
 
     for line in text.split("\n"):
-        stripped = line.strip()
-        if not stripped:
+        s = line.strip()
+        if not s:
             continue
 
         # Overall score
-        m = re.search(r"Overall[:\s]+(\d+)/(\d+)", stripped)
+        m = re.search(r"Overall[:\s]+(\d+)/(\d+)", s)
         if m:
             overall_score = (int(m.group(1)), int(m.group(2)))
             continue
 
         # Pillar header
-        m = re.match(r"Pillar (\d) — (.+?)\s+([\u2714\u2718\u26a0\u274c\u2705\u26a0\ufe0f]+.*?)\s+(\d+)/(\d+)", stripped)
-        if not m:
-            m = re.match(r"Pillar (\d)[^\d]", stripped)
-        if m and len(m.groups()) >= 1:
+        m = re.match(r"Pillar (\d)[^\d]", s)
+        if m:
             num = m.group(1)
-            status_str = stripped
-            if "FAIL" in stripped or "❌" in stripped:
+            if "FAIL" in s or "❌" in s:
                 status = "fail"
-            elif "WARN" in stripped or "⚠" in stripped:
+            elif "WARN" in s or "⚠" in s:
                 status = "warn"
             else:
                 status = "pass"
-
-            # Try to extract pass/total
-            score_m = re.search(r"(\d+)/(\d+)", stripped)
-            pass_count = int(score_m.group(1)) if score_m else 0
-            total_count = int(score_m.group(2)) if score_m else 0
-
+            score_m = re.search(r"(\d+)/(\d+)", s)
             pillar = {
                 "num": num,
                 "name": pillar_names.get(num, f"Pillar {num}"),
                 "status": status,
-                "pass": pass_count,
-                "total": total_count,
+                "pass": int(score_m.group(1)) if score_m else 0,
+                "total": int(score_m.group(2)) if score_m else 0,
                 "checks": [],
             }
             pillars.append(pillar)
-            checks_by_pillar[num] = pillar
             current_pillar = pillar
             in_actions = False
             continue
 
         # Check row
-        m = re.match(r"(❌|⚠️|✅|ℹ️)\s*(FAIL|WARN|PASS|INFO)\s+\[([A-Z0-9\-]+)\]\s+(.+)", stripped)
+        m = re.match(r"(❌|⚠️|✅|ℹ️)\s*(FAIL|WARN|PASS|INFO)\s+\[([A-Z0-9\-]+)\]\s+(.+)", s)
         if m and current_pillar is not None:
-            icon, status, check_id, name = m.group(1), m.group(2), m.group(3), m.group(4)
-            check = {
-                "icon": icon,
-                "status": status.lower(),
-                "id": check_id,
-                "name": name,
+            current_pillar["checks"].append({
+                "status": m.group(2).lower(),
+                "id": m.group(3),
+                "name": m.group(4),
                 "recommendation": None,
-            }
-            current_pillar["checks"].append(check)
+            })
             continue
 
-        # Recommendation line
-        if (stripped.startswith("→") or stripped.startswith("→")) and current_pillar and current_pillar["checks"]:
-            msg = stripped.lstrip("→").strip()
-            current_pillar["checks"][-1]["recommendation"] = msg
+        # Recommendation
+        if s.startswith("→") and current_pillar and current_pillar["checks"]:
+            current_pillar["checks"][-1]["recommendation"] = s.lstrip("→").strip()
             continue
 
-        # Action items section
-        if re.search(r"(TOP|PRIORITY|ACTION|PRIORIT)", stripped.upper()) and re.search(r"\d", stripped):
+        # Action items
+        if re.search(r"(TOP|PRIORITY|ACTION)", s.upper()) and not in_actions:
             in_actions = True
             continue
         if in_actions:
-            m = re.match(r"(\d+)[.)]\s+(.+)", stripped)
+            m = re.match(r"(\d+)[.)]\s+(.+)", s)
             if m:
                 action_items.append(m.group(2))
-                continue
 
-        # Collect summary text (before first pillar)
-        if not pillars and not re.match(r"^[═─]{5,}", stripped):
-            if not re.match(r"^Automated pillar", stripped):
-                summary_lines.append(stripped)
-
-    # Fallback score
     if not overall_score and pillars:
-        total_pass = sum(p["pass"] for p in pillars)
-        total_checks = sum(p["total"] for p in pillars)
-        if total_checks:
-            overall_score = (total_pass, total_checks)
+        tp = sum(p["pass"] for p in pillars)
+        tc = sum(p["total"] for p in pillars)
+        overall_score = (tp, tc) if tc else (0, 0)
 
     return {
         "pillars": pillars,
         "overall_score": overall_score,
         "action_items": action_items,
-        "summary": " ".join(summary_lines[:3]) if summary_lines else "",
         "raw": text,
     }
 
 
 # ─────────────────────────────────────────────
-# HTML renderer
+# Helpers
 # ─────────────────────────────────────────────
 
 PILLAR_ICONS = {
-    "1": "⚙️", "2": "🔒", "3": "🛡️",
-    "4": "💰", "5": "👁️", "6": "⚡",
+    "1": "fa-shield-halved",
+    "2": "fa-lock",
+    "3": "fa-circle-check",
+    "4": "fa-coins",
+    "5": "fa-eye",
+    "6": "fa-bolt",
 }
 
 PILLAR_COLORS = {
-    "1": "#2563eb", "2": "#dc2626", "3": "#16a34a",
-    "4": "#d97706", "5": "#9333ea", "6": "#0891b2",
+    "1": "#2563eb",
+    "2": "#dc2626",
+    "3": "#16a34a",
+    "4": "#d97706",
+    "5": "#9333ea",
+    "6": "#0891b2",
 }
 
+def _status_classes(status: str):
+    return {
+        "pass": ("bg-emerald-100 text-emerald-800", "text-emerald-600", "bg-emerald-600"),
+        "fail": ("bg-red-100 text-red-800",         "text-red-600",     "bg-red-600"),
+        "warn": ("bg-yellow-100 text-yellow-800",   "text-yellow-600",  "bg-yellow-400"),
+        "info": ("bg-blue-100 text-blue-800",        "text-blue-600",    "bg-blue-500"),
+    }.get(status, ("bg-gray-100 text-gray-800", "text-gray-600", "bg-gray-400"))
 
-def _score_color(pct: float) -> str:
-    if pct >= 0.8:
-        return "#16a34a"
-    if pct >= 0.5:
-        return "#d97706"
-    return "#dc2626"
+def _clean(text: str) -> str:
+    """Strip markdown artifacts from text."""
+    text = re.sub(r"#{1,6}\s*", "", text)
+    text = re.sub(r"\*{1,3}(.+?)\*{1,3}", r"\1", text)
+    text = re.sub(r"`([^`]+)`", r'<code class="bg-gray-100 text-gray-800 text-xs px-1.5 py-0.5 rounded font-mono">\1</code>', text)
+    text = re.sub(r"[═─]{5,}", "", text)
+    return text.strip()
 
 
-def _pillar_cards(pillars: list) -> str:
-    if not pillars:
+# ─────────────────────────────────────────────
+# Sections
+# ─────────────────────────────────────────────
+
+def _score_card(score, score_pct, score_color_cls, grade, grade_cls, target_name, timestamp):
+    r, c = 40, 251.2
+    offset = c - (score_pct / 100) * c
+    return f"""
+    <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm flex flex-col items-center">
+      <h2 class="text-xl font-semibold mb-4 text-gray-900 dark:text-white">Overall Score</h2>
+      <div class="w-36 h-36 relative">
+        <svg class="-rotate-90" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="{r}" stroke="#e5e7eb" stroke-width="10" fill="none"/>
+          <circle cx="50" cy="50" r="{r}"
+            stroke="{score_color_cls}"
+            stroke-width="10"
+            stroke-dasharray="{c}"
+            stroke-dashoffset="{offset:.1f}"
+            stroke-linecap="round" fill="none"/>
+        </svg>
+        <div class="absolute inset-0 flex flex-col items-center justify-center">
+          <div class="text-xs text-gray-500 dark:text-gray-400">Score</div>
+          <div class="text-2xl font-bold text-gray-900 dark:text-white">{score_pct}%</div>
+          <span class="mt-1 px-3 py-1 rounded-full text-xs font-semibold {grade_cls}">{grade}</span>
+        </div>
+      </div>
+      <div class="mt-4 text-sm text-gray-500 dark:text-gray-400 text-center">
+        <div class="font-semibold text-gray-700 dark:text-gray-200">{target_name}</div>
+        <div class="text-xs mt-1">{score[0]}/{score[1]} checks passing</div>
+        <div class="text-xs mt-1">{timestamp}</div>
+      </div>
+    </div>"""
+
+
+def _pillar_summary_cards(pillars):
+    cards = ""
+    for p in pillars:
+        badge_cls, text_cls, _ = _status_classes(p["status"])
+        pct = int(p["pass"] / p["total"] * 100) if p["total"] else 0
+        bar_color = {"pass": "bg-emerald-500", "fail": "bg-red-500", "warn": "bg-yellow-400"}.get(p["status"], "bg-gray-400")
+        icon = PILLAR_ICONS.get(p["num"], "fa-circle")
+        color = PILLAR_COLORS.get(p["num"], "#2563eb")
+        cards += f"""
+        <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border-t-4" style="border-top-color:{color}">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:{color}20">
+                <i class="fas {icon} text-sm" style="color:{color}"></i>
+              </div>
+              <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Pillar {p["num"]}</span>
+            </div>
+            <span class="text-xs font-semibold px-2 py-1 rounded-full {badge_cls}">{p["status"].upper()}</span>
+          </div>
+          <div class="font-semibold text-gray-900 dark:text-white text-sm mb-3">{p["name"]}</div>
+          <div class="flex items-center justify-between text-sm mb-1">
+            <span class="text-gray-500 dark:text-gray-400">{p["pass"]}/{p["total"]} passing</span>
+            <span class="font-bold {text_cls}">{pct}%</span>
+          </div>
+          <div class="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+            <div class="{bar_color} h-2 rounded-full" style="width:{pct}%"></div>
+          </div>
+        </div>"""
+    return cards
+
+
+def _action_items(items):
+    if not items:
         return ""
-    cards = []
-    for p in pillars:
-        color = PILLAR_COLORS.get(p["num"], "#2563eb")
-        pct = (p["pass"] / p["total"] * 100) if p["total"] else 0
-        sc = _score_color(pct / 100)
-        status_label = p["status"].upper()
-        status_cls = p["status"]
-        icon = PILLAR_ICONS.get(p["num"], "●")
-        cards.append(f"""
-        <div class="pillar-card" style="--pillar-color:{color}">
-          <div class="pc-top">
-            <span class="pc-icon">{icon}</span>
-            <span class="pc-num">Pillar {p["num"]}</span>
-            <span class="pc-badge {status_cls}">{status_label}</span>
+    rows = ""
+    urgencies = [("High", "bg-red-100 text-red-700"), ("Medium", "bg-yellow-100 text-yellow-700"), ("Low", "bg-emerald-100 text-emerald-700")]
+    for i, item in enumerate(items[:5]):
+        label, cls = urgencies[min(i, 2)]
+        rows += f"""
+        <div class="flex items-start gap-4 p-4 border-b border-gray-100 dark:border-gray-700 last:border-0">
+          <div class="w-8 h-8 rounded-full bg-gray-900 dark:bg-gray-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">{i+1}</div>
+          <div class="flex-1">
+            <div class="text-sm text-gray-800 dark:text-gray-200 mb-1">{_clean(item)}</div>
+            <span class="text-xs font-semibold px-2 py-0.5 rounded-full {cls}">{label} priority</span>
           </div>
-          <div class="pc-name">{p["name"]}</div>
-          <div class="pc-score" style="color:{sc}">{p["pass"]}<span>/{p["total"]}</span></div>
-          <div class="pc-bar-bg">
-            <div class="pc-bar-fill" style="width:{pct:.0f}%;background:{sc}"></div>
-          </div>
-        </div>""")
-    return "\n".join(cards)
+        </div>"""
+    return rows
 
 
-def _pillar_sections(pillars: list) -> str:
-    if not pillars:
-        return "<p>No pillar data found.</p>"
-    sections = []
+def _pillar_detail_sections(pillars):
+    sections = ""
     for p in pillars:
+        icon = PILLAR_ICONS.get(p["num"], "fa-circle")
         color = PILLAR_COLORS.get(p["num"], "#2563eb")
-        icon = PILLAR_ICONS.get(p["num"], "●")
-        pct = (p["pass"] / p["total"] * 100) if p["total"] else 0
-        sc = _score_color(pct / 100)
+        badge_cls, text_cls, _ = _status_classes(p["status"])
+        pct = int(p["pass"] / p["total"] * 100) if p["total"] else 0
+        bar_color = {"pass": "bg-emerald-500", "fail": "bg-red-500", "warn": "bg-yellow-400"}.get(p["status"], "bg-gray-400")
 
         checks_html = ""
         for c in p["checks"]:
-            cls = c["status"]
-            label = c["status"].upper()
+            cb, ct, _ = _status_classes(c["status"])
+            ci = {"pass": "fa-circle-check", "fail": "fa-circle-xmark", "warn": "fa-triangle-exclamation", "info": "fa-circle-info"}.get(c["status"], "fa-circle")
             rec = ""
             if c["recommendation"]:
-                rec = f'<div class="rec">→ {c["recommendation"]}</div>'
+                rec = f'<div class="mt-1 ml-20 text-xs text-gray-500 dark:text-gray-400 flex items-start gap-1"><i class="fas fa-arrow-right text-red-400 mt-0.5 flex-shrink-0"></i><span>{_clean(c["recommendation"])}</span></div>'
             checks_html += f"""
-            <div class="check-item {cls}">
-              <div class="ci-top">
-                <span class="ci-badge {cls}">{label}</span>
-                <span class="ci-id">{c["id"]}</span>
-                <span class="ci-name">{c["name"]}</span>
+            <div class="flex flex-col py-3 border-b border-gray-50 dark:border-gray-700 last:border-0">
+              <div class="flex items-center gap-3">
+                <i class="fas {ci} {ct} w-4 flex-shrink-0"></i>
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full {cb} min-w-[48px] text-center">{c["status"].upper()}</span>
+                <span class="font-mono text-xs text-gray-400 min-w-[56px]">{c["id"]}</span>
+                <span class="text-sm text-gray-800 dark:text-gray-200">{_clean(c["name"])}</span>
               </div>
               {rec}
             </div>"""
 
         if not checks_html:
-            checks_html = "<p class='no-checks'>No individual checks recorded.</p>"
+            checks_html = '<p class="text-sm text-gray-400 py-2">No individual checks recorded.</p>'
 
-        sections.append(f"""
-        <div class="pillar-section" id="pillar-{p["num"]}">
-          <div class="ps-header" style="border-left-color:{color}">
-            <div class="ps-title">
-              <span class="ps-icon">{icon}</span>
-              <span>Pillar {p["num"]} — {p["name"]}</span>
-            </div>
-            <div class="ps-meta">
-              <div class="ps-bar-bg">
-                <div class="ps-bar-fill" style="width:{pct:.0f}%;background:{sc}"></div>
+        sections += f"""
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden" id="pillar-{p["num"]}">
+          <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-700" style="border-left:4px solid {color}">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl flex items-center justify-center" style="background:{color}20">
+                <i class="fas {icon} text-sm" style="color:{color}"></i>
               </div>
-              <span class="ps-score" style="color:{sc}">{p["pass"]}/{p["total"]}</span>
+              <div>
+                <div class="font-semibold text-gray-900 dark:text-white">Pillar {p["num"]} — {p["name"]}</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">{p["pass"]}/{p["total"]} checks passing</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <div class="w-24 bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+                <div class="{bar_color} h-2 rounded-full" style="width:{pct}%"></div>
+              </div>
+              <span class="text-sm font-bold {text_cls} w-8 text-right">{pct}%</span>
+              <span class="text-xs font-semibold px-2 py-1 rounded-full {badge_cls}">{p["status"].upper()}</span>
             </div>
           </div>
-          <div class="checks-list">
+          <div class="px-6 py-2">
             {checks_html}
           </div>
-        </div>""")
-    return "\n".join(sections)
-
-
-def _action_items_html(items: list) -> str:
-    if not items:
-        return ""
-    rows = ""
-    for i, item in enumerate(items[:5], 1):
-        urgency = "High" if i == 1 else ("Medium" if i == 2 else "Low")
-        urg_cls = "high" if i == 1 else ("medium" if i == 2 else "low")
-        rows += f"""
-        <div class="action-row">
-          <div class="ar-num">{i}</div>
-          <div class="ar-body">
-            <div class="ar-text">{item}</div>
-            <span class="ar-urgency {urg_cls}">{urgency} priority</span>
-          </div>
         </div>"""
-    return rows
+    return sections
 
+
+def _nav_items(pillars):
+    items = ""
+    for p in pillars:
+        icon = PILLAR_ICONS.get(p["num"], "fa-circle")
+        dot = {"pass": "text-emerald-500", "fail": "text-red-500", "warn": "text-yellow-400"}.get(p["status"], "text-gray-400")
+        di = {"pass": "fa-circle-check", "fail": "fa-circle-xmark", "warn": "fa-triangle-exclamation"}.get(p["status"], "fa-circle")
+        items += f"""
+        <a href="#pillar-{p["num"]}" class="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white transition text-sm">
+          <i class="fas {di} {dot} text-xs w-3"></i>
+          <i class="fas {icon} text-xs w-3 text-gray-500"></i>
+          <span>Pillar {p["num"]} — {p["name"]}</span>
+        </a>"""
+    return items
+
+
+# ─────────────────────────────────────────────
+# Main generator
+# ─────────────────────────────────────────────
 
 def generate_html(report_text: str, target_path: str) -> str:
     data = parse_report(report_text)
@@ -252,29 +305,40 @@ def generate_html(report_text: str, target_path: str) -> str:
     target_abs = os.path.abspath(target_path)
     target_name = os.path.basename(target_abs)
 
-    score = data["overall_score"]
-    if score:
-        score_pct = int(score[0] / score[1] * 100) if score[1] else 0
-        score_color = _score_color(score_pct / 100)
-        score_display = f"{score[0]}/{score[1]}"
-        grade = "PASS" if score_pct >= 70 else ("AT RISK" if score_pct >= 40 else "FAIL")
-        grade_cls = "pass" if score_pct >= 70 else ("warn" if score_pct >= 40 else "fail")
+    score = data["overall_score"] or (0, 1)
+    score_pct = int(score[0] / score[1] * 100) if score[1] else 0
+
+    if score_pct >= 75:
+        score_color_hex = "#16a34a"
+        grade = "PASS"
+        grade_cls = "bg-emerald-100 text-emerald-800"
+    elif score_pct >= 40:
+        score_color_hex = "#d97706"
+        grade = "AT RISK"
+        grade_cls = "bg-yellow-100 text-yellow-800"
     else:
-        score_pct, score_color, score_display = 0, "#dc2626", "—"
-        grade, grade_cls = "UNKNOWN", "warn"
+        score_color_hex = "#dc2626"
+        grade = "FAIL"
+        grade_cls = "bg-red-100 text-red-800"
 
-    pillar_cards = _pillar_cards(data["pillars"])
-    pillar_sections = _pillar_sections(data["pillars"])
-    action_rows = _action_items_html(data["action_items"])
+    score_card      = _score_card(score, score_pct, score_color_hex, grade, grade_cls, target_name, timestamp)
+    summary_cards   = _pillar_summary_cards(data["pillars"])
+    actions_html    = _action_items(data["action_items"])
+    detail_sections = _pillar_detail_sections(data["pillars"])
+    nav_html        = _nav_items(data["pillars"])
 
-    # Sidebar nav
-    nav_items = ""
-    for p in data["pillars"]:
-        color = PILLAR_COLORS.get(p["num"], "#2563eb")
-        icon = PILLAR_ICONS.get(p["num"], "●")
-        cls = p["status"]
-        dot = "✅" if cls == "pass" else ("❌" if cls == "fail" else "⚠️")
-        nav_items += f'<a href="#pillar-{p["num"]}" class="nav-link">{dot} {icon} Pillar {p["num"]} — {p["name"]}</a>\n'
+    actions_block = ""
+    if actions_html:
+        actions_block = f"""
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden" id="actions">
+          <div class="flex items-center gap-3 px-6 py-4 border-b border-gray-100 dark:border-gray-700 bg-gray-900">
+            <i class="fas fa-bullseye text-white"></i>
+            <h3 class="text-white font-semibold">Priority Actions</h3>
+          </div>
+          {actions_html}
+        </div>"""
+
+    raw_text_escaped = report_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -282,384 +346,149 @@ def generate_html(report_text: str, target_path: str) -> str:
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>WAF Review — {target_name}</title>
-  <style>
-    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    :root {{
-      --bg: #f1f5f9;
-      --surface: #ffffff;
-      --border: #e2e8f0;
-      --text: #0f172a;
-      --muted: #64748b;
-      --pass: #16a34a; --pass-bg: #f0fdf4; --pass-light: #dcfce7;
-      --fail: #dc2626; --fail-bg: #fef2f2; --fail-light: #fee2e2;
-      --warn: #d97706; --warn-bg: #fffbeb; --warn-light: #fef3c7;
-      --info: #2563eb; --info-bg: #eff6ff;
-      --sidebar-w: 280px;
-      --radius: 12px;
-    }}
-
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      display: flex;
-      min-height: 100vh;
-    }}
-
-    /* ── Sidebar ───────────────────────────────── */
-    .sidebar {{
-      position: fixed; top: 0; left: 0;
-      width: var(--sidebar-w); height: 100vh;
-      background: #0f172a;
-      padding: 2rem 1.5rem;
-      overflow-y: auto;
-      display: flex; flex-direction: column; gap: 0.25rem;
-    }}
-    .sidebar-logo {{
-      font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.12em; color: #475569;
-      margin-bottom: 0.5rem; padding-bottom: 1rem;
-      border-bottom: 1px solid #1e293b;
-    }}
-    .sidebar-title {{
-      font-size: 0.95rem; font-weight: 700; color: #f1f5f9;
-      margin-bottom: 0.25rem;
-    }}
-    .sidebar-target {{
-      font-size: 0.75rem; color: #7dd3fc; font-family: monospace;
-      margin-bottom: 1.5rem; word-break: break-all;
-    }}
-    .sidebar-section {{
-      font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.1em; color: #475569;
-      margin: 1rem 0 0.4rem;
-    }}
-    .nav-link {{
-      display: block; font-size: 0.8rem; color: #94a3b8;
-      padding: 0.35rem 0.6rem; border-radius: 6px;
-      text-decoration: none; transition: background 0.15s, color 0.15s;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }}
-    .nav-link:hover {{ background: #1e293b; color: #f1f5f9; }}
-
-    /* ── Main ──────────────────────────────────── */
-    .main {{
-      margin-left: var(--sidebar-w);
-      padding: 2.5rem 2rem 6rem;
-      width: 100%;
-      max-width: calc(var(--sidebar-w) + 900px);
-    }}
-
-    /* ── Hero header ───────────────────────────── */
-    .hero {{
-      background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
-      border-radius: var(--radius);
-      padding: 2.5rem 3rem;
-      margin-bottom: 2rem;
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 2rem;
-    }}
-    .hero-left h1 {{
-      font-size: 1.6rem; font-weight: 800; color: #f8fafc;
-      margin-bottom: 0.4rem; line-height: 1.2;
-    }}
-    .hero-left .hero-sub {{
-      font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.6rem;
-    }}
-    .hero-left .hero-target {{
-      font-family: monospace; font-size: 0.82rem;
-      color: #7dd3fc; background: rgba(125,211,252,0.1);
-      padding: 0.3rem 0.8rem; border-radius: 6px; display: inline-block;
-    }}
-    .hero-score {{
-      flex-shrink: 0; text-align: center;
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: var(--radius);
-      padding: 1.5rem 2rem;
-    }}
-    .hero-score .hs-num {{
-      font-size: 3rem; font-weight: 900; line-height: 1;
-      color: {score_color};
-    }}
-    .hero-score .hs-label {{
-      font-size: 0.75rem; color: #94a3b8; margin-top: 0.3rem; text-transform: uppercase; letter-spacing: 0.08em;
-    }}
-    .hero-score .hs-grade {{
-      display: inline-block; font-size: 0.75rem; font-weight: 700;
-      padding: 0.25rem 0.8rem; border-radius: 99px; margin-top: 0.5rem;
-    }}
-    .hs-grade.pass {{ background: var(--pass-light); color: var(--pass); }}
-    .hs-grade.warn {{ background: var(--warn-light); color: var(--warn); }}
-    .hs-grade.fail {{ background: var(--fail-light); color: var(--fail); }}
-
-    /* ── Section titles ────────────────────────── */
-    .section-title {{
-      font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.1em; color: var(--muted);
-      margin: 2.5rem 0 1rem;
-    }}
-
-    /* ── Pillar cards grid ─────────────────────── */
-    .pillar-grid {{
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1rem;
-      margin-bottom: 0.5rem;
-    }}
-    .pillar-card {{
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-top: 3px solid var(--pillar-color);
-      border-radius: var(--radius);
-      padding: 1.25rem;
-      cursor: default;
-      transition: box-shadow 0.15s;
-    }}
-    .pillar-card:hover {{ box-shadow: 0 4px 20px rgba(0,0,0,0.08); }}
-    .pc-top {{
-      display: flex; align-items: center; gap: 0.5rem;
-      margin-bottom: 0.6rem;
-    }}
-    .pc-icon {{ font-size: 1.1rem; }}
-    .pc-num {{
-      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.08em; color: var(--muted); flex: 1;
-    }}
-    .pc-badge {{
-      font-size: 0.65rem; font-weight: 700;
-      padding: 0.15rem 0.5rem; border-radius: 99px;
-    }}
-    .pc-badge.pass {{ background: var(--pass-light); color: var(--pass); }}
-    .pc-badge.fail {{ background: var(--fail-light); color: var(--fail); }}
-    .pc-badge.warn {{ background: var(--warn-light); color: var(--warn); }}
-    .pc-name {{
-      font-size: 0.88rem; font-weight: 700; color: var(--text);
-      margin-bottom: 0.75rem; line-height: 1.3;
-    }}
-    .pc-score {{
-      font-size: 1.6rem; font-weight: 900; line-height: 1; margin-bottom: 0.5rem;
-    }}
-    .pc-score span {{ font-size: 1rem; font-weight: 500; color: var(--muted); }}
-    .pc-bar-bg {{
-      height: 4px; background: var(--border); border-radius: 99px; overflow: hidden;
-    }}
-    .pc-bar-fill {{ height: 100%; border-radius: 99px; transition: width 0.6s; }}
-
-    /* ── Pillar detail sections ────────────────── */
-    .pillar-section {{
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      margin-bottom: 1.25rem;
-      overflow: hidden;
-    }}
-    .ps-header {{
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 1.1rem 1.5rem;
-      border-left: 4px solid;
-      background: #fafbfc;
-      border-bottom: 1px solid var(--border);
-    }}
-    .ps-title {{
-      display: flex; align-items: center; gap: 0.6rem;
-      font-size: 0.95rem; font-weight: 700;
-    }}
-    .ps-icon {{ font-size: 1.1rem; }}
-    .ps-meta {{
-      display: flex; align-items: center; gap: 0.75rem;
-    }}
-    .ps-bar-bg {{
-      width: 80px; height: 6px; background: var(--border);
-      border-radius: 99px; overflow: hidden;
-    }}
-    .ps-bar-fill {{ height: 100%; border-radius: 99px; }}
-    .ps-score {{
-      font-size: 0.85rem; font-weight: 700; min-width: 32px; text-align: right;
-    }}
-    .checks-list {{ padding: 0.75rem 1.5rem 1rem; }}
-
-    /* ── Check items ───────────────────────────── */
-    .check-item {{
-      padding: 0.6rem 0;
-      border-bottom: 1px solid #f1f5f9;
-    }}
-    .check-item:last-child {{ border-bottom: none; }}
-    .ci-top {{
-      display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
-    }}
-    .ci-badge {{
-      font-size: 0.65rem; font-weight: 700;
-      padding: 0.15rem 0.5rem; border-radius: 99px; min-width: 44px; text-align: center;
-    }}
-    .ci-badge.pass {{ background: var(--pass-light); color: var(--pass); }}
-    .ci-badge.fail {{ background: var(--fail-light); color: var(--fail); }}
-    .ci-badge.warn {{ background: var(--warn-light); color: var(--warn); }}
-    .ci-badge.info {{ background: var(--info-bg); color: var(--info); }}
-    .ci-id {{
-      font-family: monospace; font-size: 0.75rem; color: #94a3b8; min-width: 56px;
-    }}
-    .ci-name {{ font-size: 0.875rem; color: var(--text); }}
-    .rec {{
-      font-size: 0.82rem; color: var(--muted);
-      padding: 0.3rem 0 0 calc(44px + 56px + 1.2rem);
-      line-height: 1.5;
-    }}
-    .rec::before {{ content: "→ "; color: var(--fail); font-weight: 600; }}
-    .no-checks {{ font-size: 0.85rem; color: var(--muted); padding: 0.5rem 0; }}
-
-    /* ── Action items ──────────────────────────── */
-    .actions-card {{
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); overflow: hidden;
-      margin-bottom: 2rem;
-    }}
-    .actions-header {{
-      background: #0f172a; padding: 1rem 1.5rem;
-      font-size: 0.9rem; font-weight: 700; color: #f8fafc;
-      display: flex; align-items: center; gap: 0.5rem;
-    }}
-    .action-row {{
-      display: flex; align-items: flex-start; gap: 1rem;
-      padding: 1rem 1.5rem;
-      border-bottom: 1px solid var(--border);
-    }}
-    .action-row:last-child {{ border-bottom: none; }}
-    .ar-num {{
-      flex-shrink: 0; width: 28px; height: 28px;
-      background: #0f172a; color: #fff;
-      border-radius: 50%; display: flex; align-items: center;
-      justify-content: center; font-size: 0.8rem; font-weight: 700;
-      margin-top: 0.1rem;
-    }}
-    .ar-body {{ flex: 1; }}
-    .ar-text {{ font-size: 0.9rem; margin-bottom: 0.3rem; }}
-    .ar-urgency {{
-      font-size: 0.68rem; font-weight: 700;
-      padding: 0.15rem 0.5rem; border-radius: 99px;
-    }}
-    .ar-urgency.high  {{ background: var(--fail-light);  color: var(--fail); }}
-    .ar-urgency.medium{{ background: var(--warn-light);  color: var(--warn); }}
-    .ar-urgency.low   {{ background: var(--pass-light);  color: var(--pass); }}
-
-    /* ── Raw report fallback ───────────────────── */
-    .raw-card {{
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 1.5rem; margin-top: 2rem;
-    }}
-    .raw-card details summary {{
-      cursor: pointer; font-size: 0.85rem; font-weight: 700; color: var(--muted);
-      user-select: none;
-    }}
-    .raw-card pre {{
-      background: #0f172a; color: #e2e8f0;
-      padding: 1.25rem; border-radius: 8px;
-      font-size: 0.78rem; line-height: 1.6;
-      overflow-x: auto; margin-top: 1rem;
-      white-space: pre-wrap; word-break: break-word;
-    }}
-
-    /* ── Footer ────────────────────────────────── */
-    .footer {{
-      text-align: center; font-size: 0.78rem; color: var(--muted);
-      margin-top: 3rem; padding-top: 1.5rem;
-      border-top: 1px solid var(--border);
-    }}
-    .footer a {{ color: var(--info); text-decoration: none; }}
-
-    /* ── Responsive ────────────────────────────── */
-    @media (max-width: 900px) {{
-      .pillar-grid {{ grid-template-columns: repeat(2, 1fr); }}
-    }}
-    @media (max-width: 700px) {{
-      .sidebar {{ display: none; }}
-      .main {{ margin-left: 0; padding: 1rem 0.75rem 4rem; }}
-      .pillar-grid {{ grid-template-columns: 1fr; }}
-      .hero {{ flex-direction: column; }}
-    }}
-  </style>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"/>
 </head>
-<body>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white">
 
-<!-- ── Sidebar ───────────────────────────────────────────── -->
-<aside class="sidebar">
-  <div class="sidebar-logo">agent-waf-reviewer</div>
-  <div class="sidebar-title">WAF Review Report</div>
-  <div class="sidebar-target">{target_abs}</div>
+<div class="flex min-h-screen">
 
-  <div class="sidebar-section">Navigation</div>
-  <a href="#summary" class="nav-link">📊 Executive Summary</a>
-  <a href="#actions" class="nav-link">🎯 Priority Actions</a>
-
-  <div class="sidebar-section">Pillars</div>
-  {nav_items}
-
-  <div class="sidebar-section">Details</div>
-  <a href="#raw" class="nav-link">📄 Full Report</a>
-</aside>
-
-<!-- ── Main ──────────────────────────────────────────────── -->
-<main class="main">
-
-  <!-- Hero -->
-  <div class="hero" id="summary">
-    <div class="hero-left">
-      <h1>Well-Architected<br>Framework Review</h1>
-      <div class="hero-sub">{timestamp}</div>
-      <div class="hero-target">{target_abs}</div>
+  <!-- SIDEBAR -->
+  <aside class="w-72 bg-gray-950 flex flex-col border-r border-gray-800 fixed top-0 left-0 h-screen overflow-y-auto">
+    <div class="p-6 border-b border-gray-800">
+      <div class="flex items-center gap-3 px-3 py-2 rounded-lg">
+        <div class="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center shadow-md flex-shrink-0">
+          <i class="fa-solid fa-shield-halved text-white text-lg"></i>
+        </div>
+        <div class="flex flex-col">
+          <span class="text-base font-semibold text-white">WAF Reviewer</span>
+          <span class="text-xs text-gray-500">AI Agent Architecture</span>
+        </div>
+      </div>
     </div>
-    <div class="hero-score">
-      <div class="hs-num" style="color:{score_color}">{score_pct}%</div>
-      <div class="hs-label">{score_display} checks passing</div>
-      <div class="hs-grade {grade_cls}">{grade}</div>
+
+    <nav class="flex-1 p-4 space-y-1">
+      <div class="text-xs font-bold uppercase tracking-widest text-gray-600 px-3 pt-2 pb-1">Overview</div>
+      <a href="#summary" class="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white transition text-sm">
+        <i class="fas fa-chart-pie text-xs w-3 text-gray-500"></i>
+        <span>Executive Summary</span>
+      </a>
+      <a href="#actions" class="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white transition text-sm">
+        <i class="fas fa-bullseye text-xs w-3 text-gray-500"></i>
+        <span>Priority Actions</span>
+      </a>
+
+      <div class="text-xs font-bold uppercase tracking-widest text-gray-600 px-3 pt-4 pb-1">Pillars</div>
+      {nav_html}
+
+      <div class="text-xs font-bold uppercase tracking-widest text-gray-600 px-3 pt-4 pb-1">Details</div>
+      <a href="#raw" class="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-gray-800 hover:text-white transition text-sm">
+        <i class="fas fa-file-lines text-xs w-3 text-gray-500"></i>
+        <span>Full Report</span>
+      </a>
+    </nav>
+
+    <div class="p-4 border-t border-gray-800 text-xs text-gray-600">
+      <a href="https://github.com/wb-platform-engineering-lab/agent-waf-reviewer" class="hover:text-gray-400 transition">
+        <i class="fab fa-github mr-1"></i>agent-waf-reviewer
+      </a>
     </div>
-  </div>
+  </aside>
 
-  <!-- Pillar summary cards -->
-  <div class="section-title">Pillar Overview</div>
-  <div class="pillar-grid">
-    {pillar_cards}
-  </div>
+  <!-- MAIN CONTENT -->
+  <main class="flex-1 ml-72 p-6 lg:p-10 space-y-8">
 
-  <!-- Priority actions -->
-  {'<div class="section-title" id="actions">Priority Actions</div>' if action_rows else ''}
-  {'<div class="actions-card"><div class="actions-header">🎯 Top Actions to Fix First</div>' + action_rows + '</div>' if action_rows else ''}
+    <!-- HERO BANNER -->
+    <div class="bg-gradient-to-r from-gray-900 to-blue-950 rounded-2xl p-8 text-white shadow-lg" id="summary">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+        <div>
+          <div class="flex items-center gap-2 mb-2">
+            <i class="fas fa-shield-halved text-blue-400"></i>
+            <span class="text-sm font-semibold text-blue-400 uppercase tracking-wider">Well-Architected Framework Review</span>
+          </div>
+          <h1 class="text-3xl font-black mb-2">Agent Architecture Report</h1>
+          <div class="flex items-center gap-2 bg-white/10 rounded-lg px-3 py-1.5 w-fit">
+            <i class="fas fa-folder-open text-blue-300 text-xs"></i>
+            <code class="text-blue-200 text-sm">{target_abs}</code>
+          </div>
+          <div class="text-gray-400 text-sm mt-3">
+            <i class="fas fa-clock mr-1"></i>{timestamp}
+            &nbsp;·&nbsp;
+            <i class="fas fa-robot mr-1"></i>claude-sonnet-4-6
+          </div>
+        </div>
+        <div class="flex-shrink-0 bg-white/10 rounded-2xl p-6 text-center min-w-[160px]">
+          <div class="text-5xl font-black" style="color:{score_color_hex}">{score_pct}%</div>
+          <div class="text-gray-400 text-sm mt-1">{score[0]}/{score[1]} checks</div>
+          <span class="mt-2 inline-block px-4 py-1 rounded-full text-sm font-bold {grade_cls}">{grade}</span>
+        </div>
+      </div>
+    </div>
 
-  <!-- Pillar details -->
-  <div class="section-title">Detailed Findings</div>
-  {pillar_sections}
+    <!-- SCORE + PILLAR CARDS -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      {score_card}
+      <div class="lg:col-span-3 grid grid-cols-2 lg:grid-cols-3 gap-4">
+        {summary_cards}
+      </div>
+    </div>
 
-  <!-- Raw report collapsible -->
-  <div class="raw-card" id="raw">
-    <details>
-      <summary>Full Agent Report (raw text)</summary>
-      <pre>{report_text.replace("<", "&lt;").replace(">", "&gt;")}</pre>
-    </details>
-  </div>
+    <!-- PRIORITY ACTIONS -->
+    {actions_block}
 
-  <div class="footer">
-    Generated by <a href="https://github.com/wb-platform-engineering-lab/agent-waf-reviewer">agent-waf-reviewer</a>
-    · claude-sonnet-4-6 · {timestamp}
-  </div>
+    <!-- DETAILED FINDINGS -->
+    <div>
+      <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+        <i class="fas fa-magnifying-glass text-gray-400"></i>
+        Detailed Findings
+      </h2>
+      <div class="space-y-4">
+        {detail_sections}
+      </div>
+    </div>
 
-</main>
+    <!-- RAW REPORT -->
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden" id="raw">
+      <button
+        type="button"
+        class="w-full flex justify-between items-center px-6 py-4 text-left font-semibold text-gray-900 dark:text-white border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition focus:outline-none"
+        onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('i').classList.toggle('rotate-180')"
+      >
+        <span class="flex items-center gap-2">
+          <i class="fas fa-file-lines text-gray-400"></i>
+          Full Agent Report
+        </span>
+        <i class="fas fa-chevron-down text-gray-400 transition-transform duration-300"></i>
+      </button>
+      <div class="hidden">
+        <pre class="bg-gray-950 text-gray-300 text-xs leading-relaxed p-6 overflow-x-auto whitespace-pre-wrap break-words font-mono">{raw_text_escaped}</pre>
+      </div>
+    </div>
+
+    <!-- FOOTER -->
+    <div class="text-center text-sm text-gray-400 pt-4 pb-8 border-t border-gray-200 dark:border-gray-700">
+      Generated by
+      <a href="https://github.com/wb-platform-engineering-lab/agent-waf-reviewer" class="text-blue-500 hover:underline">agent-waf-reviewer</a>
+      &nbsp;·&nbsp; claude-sonnet-4-6 &nbsp;·&nbsp; {timestamp}
+    </div>
+
+  </main>
+</div>
 
 <script>
-  // Highlight active sidebar link on scroll
+  // Active sidebar nav on scroll
   const sections = document.querySelectorAll('[id^="pillar-"], #summary, #actions, #raw');
-  const links = document.querySelectorAll('.nav-link');
-  const obs = new IntersectionObserver(entries => {{
-    entries.forEach(e => {{
-      if (e.isIntersecting) {{
-        links.forEach(l => l.style.background = '');
-        links.forEach(l => l.style.color = '');
-        const a = document.querySelector(`.nav-link[href="#${{e.target.id}}"]`);
-        if (a) {{ a.style.background = '#1e293b'; a.style.color = '#f1f5f9'; }}
+  const links = document.querySelectorAll('aside nav a');
+  const observer = new IntersectionObserver(entries => {{
+    entries.forEach(entry => {{
+      if (entry.isIntersecting) {{
+        links.forEach(l => {{ l.classList.remove('bg-gray-800', 'text-white'); }});
+        const active = document.querySelector(`aside nav a[href="#${{entry.target.id}}"]`);
+        if (active) active.classList.add('bg-gray-800', 'text-white');
       }}
     }});
   }}, {{ rootMargin: '-20% 0px -70% 0px' }});
-  sections.forEach(s => obs.observe(s));
+  sections.forEach(s => observer.observe(s));
 </script>
 
 </body>
@@ -667,14 +496,10 @@ def generate_html(report_text: str, target_path: str) -> str:
 
 
 def save_report(report_text: str, target_path: str, output_dir: str = ".") -> str:
-    """Save the HTML report and return the file path."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     target_name = os.path.basename(os.path.abspath(target_path))
     filename = f"waf_review_{target_name}_{timestamp}.html"
     output_path = os.path.join(output_dir, filename)
-
-    html = generate_html(report_text, target_path)
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html)
-
+        f.write(generate_html(report_text, target_path))
     return output_path
