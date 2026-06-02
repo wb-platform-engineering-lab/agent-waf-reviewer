@@ -538,8 +538,8 @@ def generate_html(report_text: str, target_path: str) -> str:
         score_color_hex, grade = "#16a34a", "PASS"
         grade_cls = "bg-emerald-100 text-emerald-800"
     elif score_pct >= 40:
-        score_color_hex, grade = "#d97706", "AT RISK"
-        grade_cls = "bg-yellow-100 text-yellow-800"
+        score_color_hex, grade = "#fb923c", "AT RISK"
+        grade_cls = "bg-orange-100 text-orange-700"
     else:
         score_color_hex, grade = "#dc2626", "FAIL"
         grade_cls = "bg-red-100 text-red-800"
@@ -613,17 +613,17 @@ def generate_html(report_text: str, target_path: str) -> str:
   <main class="flex-1 ml-72 p-6 lg:p-10 space-y-8">
 
     <!-- HERO -->
-    <div class="bg-gradient-to-r from-gray-900 to-blue-950 rounded-2xl p-8 text-white shadow-lg" id="summary">
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-8 shadow-sm" id="summary">
       <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
         <div>
           <div class="flex items-center gap-2 mb-2">
-            <i class="fas fa-shield-halved text-blue-400"></i>
-            <span class="text-xs font-bold text-blue-400 uppercase tracking-wider">Well-Architected Framework Review</span>
+            <i class="fas fa-shield-halved text-blue-500"></i>
+            <span class="text-xs font-bold text-blue-500 uppercase tracking-wider">Well-Architected Framework Review</span>
           </div>
-          <h1 class="text-2xl font-black mb-3">Agent Architecture Report</h1>
-          <div class="flex items-center gap-2 bg-white/10 rounded-lg px-3 py-1.5 w-fit mb-3">
-            <i class="fas fa-folder-open text-blue-300 text-xs"></i>
-            <code class="text-blue-200 text-xs">{target_abs}</code>
+          <h1 class="text-2xl font-black mb-3 text-gray-900 dark:text-white">Agent Architecture Report</h1>
+          <div class="flex items-center gap-2 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-1.5 w-fit mb-3">
+            <i class="fas fa-folder-open text-gray-400 text-xs"></i>
+            <code class="text-gray-600 dark:text-gray-300 text-xs">{target_abs}</code>
           </div>
           <div class="text-gray-400 text-sm">
             <i class="fas fa-clock mr-1"></i>{timestamp}
@@ -631,7 +631,7 @@ def generate_html(report_text: str, target_path: str) -> str:
             <i class="fas fa-robot mr-1"></i>claude-sonnet-4-6
           </div>
         </div>
-        <div class="flex-shrink-0 bg-white/10 border border-white/10 rounded-2xl p-6 text-center min-w-[150px]">
+        <div class="flex-shrink-0 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-2xl p-6 text-center min-w-[150px]">
           <div class="text-5xl font-black" style="color:{score_color_hex}">{score_pct}%</div>
           <div class="text-gray-400 text-xs mt-1">{score[0]}/{score[1]} checks</div>
           <span class="mt-2 inline-block px-4 py-1 rounded-full text-sm font-bold {grade_cls}">{grade}</span>
