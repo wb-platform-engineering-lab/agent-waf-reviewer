@@ -120,7 +120,7 @@ def list_files(path: str) -> str:
     return "\n".join(sorted(found))
 
 
-def read_file(path: str, max_chars: int = 12000) -> str:
+def read_file(path: str, max_chars: int = 4000) -> str:
     """Read a file, truncating if it exceeds max_chars."""
     if ".." in path:
         return "Error: invalid path"
@@ -215,31 +215,26 @@ def run_pillar_checks(path: str) -> str:
             "description": check["description"],
         })
 
-    # Format output
-    lines = [f"Automated pillar checks — {file_count} Python files scanned\n"]
-    pillar_scores = {}
+    # Compact output — pass lines are short, only failures get descriptions
+    lines = [f"WAF checks ({file_count} files scanned)"]
+    total_pass = total_checks = 0
 
     for pillar_num, pillar_name in PILLARS.items():
         checks = findings[pillar_num]
         passes = sum(1 for c in checks if c["status"] == "✅ PASS")
         total = len(checks)
-        pillar_scores[pillar_num] = (passes, total)
-
-        overall = "✅ PASS" if passes == total else ("❌ FAIL" if any("FAIL" in c["status"] for c in checks) else "⚠️  WARN")
-        lines.append(f"\n{'─'*60}")
-        lines.append(f"Pillar {pillar_num} — {pillar_name}  [{overall}]  {passes}/{total} checks passing")
-        lines.append(f"{'─'*60}")
+        total_pass += passes
+        total_checks += total
+        overall = "PASS" if passes == total else ("FAIL" if any("FAIL" in c["status"] for c in checks) else "WARN")
+        lines.append(f"\nP{pillar_num} {pillar_name} [{overall}] {passes}/{total}")
         for c in checks:
-            lines.append(f"  {c['status']}  [{c['id']}] {c['name']}")
-            if "FAIL" in c["status"] or "WARN" in c["status"]:
-                lines.append(f"         → {c['description']}")
+            lines.append(f"  {c['status']} [{c['id']}] {c['name']}")
+            if ("FAIL" in c["status"] or "WARN" in c["status"]) and c["description"]:
+                # Truncate description to keep output tight
+                desc = c["description"][:120] + ("…" if len(c["description"]) > 120 else "")
+                lines.append(f"    → {desc}")
 
-    total_pass = sum(s[0] for s in pillar_scores.values())
-    total_checks = sum(s[1] for s in pillar_scores.values())
-    lines.append(f"\n{'═'*60}")
-    lines.append(f"Overall: {total_pass}/{total_checks} checks passing")
-    lines.append(f"{'═'*60}")
-
+    lines.append(f"\nTOTAL: {total_pass}/{total_checks} checks passing")
     return "\n".join(lines)
 
 

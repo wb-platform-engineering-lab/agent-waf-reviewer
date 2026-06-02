@@ -20,10 +20,10 @@ import report as r
 # Config
 # ─────────────────────────────────────────────
 
-MODEL = "claude-sonnet-4-6"
-MAX_ITERATIONS = 20
-MAX_TOKENS_INPUT = 150_000
-MAX_OUTPUT_TOKENS = 8192
+MODEL = "claude-haiku-4-5-20251001"
+MAX_ITERATIONS = 15
+MAX_TOKENS_INPUT = 80_000
+MAX_OUTPUT_TOKENS = 4096
 
 SYSTEM_PROMPT = """You are an expert AI agent architect conducting a Well-Architected Framework review.
 
@@ -58,6 +58,27 @@ Only report what you observed. Do not hallucinate findings.
 # Agent loop
 # ─────────────────────────────────────────────
 
+_TRIM_THRESHOLD = 1500   # chars — tool results larger than this get trimmed in old turns
+_TRIM_KEEP      = 300    # chars to keep from the start of a trimmed result
+
+
+def _prune_context(messages: list) -> None:
+    """Trim large tool results in all but the most recent user turn to save input tokens."""
+    # Find the index of the last user message (the one we just appended)
+    last_user = max(i for i, m in enumerate(messages) if m["role"] == "user")
+    for i, msg in enumerate(messages):
+        if i == last_user or msg["role"] != "user":
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "tool_result":
+                text = item.get("content", "")
+                if isinstance(text, str) and len(text) > _TRIM_THRESHOLD:
+                    item["content"] = text[:_TRIM_KEEP] + f"\n... [trimmed — {len(text)} chars total]"
+
+
 def run_review(target_path: str) -> str:
     client = anthropic.Anthropic()
 
@@ -78,6 +99,7 @@ and finish with a structured report and prioritized action list."""
 
     while iteration < MAX_ITERATIONS:
         iteration += 1
+        _prune_context(messages)
 
         response = client.messages.create(
             model=MODEL,
